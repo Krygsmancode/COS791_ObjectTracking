@@ -34,10 +34,6 @@ object_tracking_project/
 ├── models/  # If you decide to use pre-trained models or save trained models
 │   └── ... (saved model files, if any)
 │
-├── tests/
-│   ├── test_ball_detection.py
-│   ├── test_ball_tracking.py
-│   └── test_enhancement.py
 │
 ├── requirements.txt  # Python dependencies
 │
