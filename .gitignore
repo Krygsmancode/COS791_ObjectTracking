@@ -1,0 +1,24 @@
+# Ignore the virtual environment
+.venv/
+venv/
+
+# Ignore Python cache files
+__pycache__/
+*.py[cod]
+
+# Ignore Jupyter Notebook checkpoints
+.ipynb_checkpoints/
+
+# Ignore system files
+.DS_Store
+
+# Ignore config and log files
+*.log
+config/settings.yaml
+
+# Ignore output data
+data/output/
+
+# Ignore any other large or generated files as needed
+*.mp4
+*.docx
