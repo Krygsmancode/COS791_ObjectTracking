@@ -1,18 +1,22 @@
-# bfa.py
-
 import numpy as np
 from utils import calculate_between_class_variance
 import random
+import logging
+import time
 
 class BeeForagingAlgorithm:
-    def __init__(self, image, num_thresholds, population_size, max_generations, nsc=0.7):
+    def __init__(self, image, num_thresholds, population_size, max_generations, nsc=0.7, limit_stagnation=10, adaptive_nsc=False):
         self.image = image
         self.num_thresholds = num_thresholds
         self.population_size = population_size
         self.max_generations = max_generations
+        self.initial_nsc = nsc
         self.nsc = nsc  # Neighborhood shrinking coefficient
+        self.adaptive_nsc = adaptive_nsc
+        self.limit_stagnation = limit_stagnation
         self.histogram = self.calculate_histogram()
         self.L = 256  # Assuming 8-bit grayscale images
+        logging.info("BFA initialized with %d thresholds, population size %d, and max generations %d", num_thresholds, population_size, max_generations)
 
         # Parameters based on the paper
         self.num_scouts = int(0.1 * population_size)
@@ -23,9 +27,6 @@ class BeeForagingAlgorithm:
         # Neighborhood size initialization
         self.neighborhood_size = (self.L - 1) / 10  # Initial neighborhood size
         self.neighborhood_sizes = []  # To track neighborhood sizes per food source
-
-        # Stagnation limit
-        self.limit_stagnation = int(2 * np.log(0.1) / np.log(self.nsc))
 
     def calculate_histogram(self):
         hist, _ = np.histogram(self.image.flatten(), bins=256, range=(0, 256))
@@ -105,16 +106,29 @@ class BeeForagingAlgorithm:
         return np.array(new_scouts)
 
     def optimize(self):
-    # Initialization Phase
+        start_time = time.time()
+        # Initialization Phase
         scouts = self.initialize_scouts()
+        logging.info("Scouts initialized")
+
         fitness_values = self.evaluate_fitness(scouts)
         selected_sources, selected_fitness = self.select_food_sources(scouts, fitness_values)
 
         best_fitness = np.max(selected_fitness)
         best_thresholds = selected_sources[np.argmax(selected_fitness)]
+        logging.info("Initial best fitness: %f", best_fitness)
 
-    # Main Loop
+        self.best_fitness_history = [best_fitness]
+        self.avg_fitness_history = [np.mean(selected_fitness)]
+        self.best_thresholds_history = [best_thresholds.copy()]
+
+        # Main Loop
         for gen in range(self.max_generations):
+            # Adaptive nsc
+            if self.adaptive_nsc:
+                self.nsc = self.initial_nsc * (1 - gen / self.max_generations)
+                self.nsc = max(self.nsc, 0.4)  # Ensure nsc doesn't become too small
+
             # Local Search Phase
             # Forager Bees
             forager_sources = self.forager_search(selected_sources)
@@ -126,6 +140,7 @@ class BeeForagingAlgorithm:
                     selected_sources[idx] = forager_sources[idx]
                     selected_fitness[idx] = forager_fitness[idx]
                     self.stagnation_counters[idx] = 0  # Reset stagnation counter
+                    self.neighborhood_sizes[idx] = self.neighborhood_size  # Reset neighborhood size
                     # Update best solution
                     if selected_fitness[idx] > best_fitness:
                         best_fitness = selected_fitness[idx]
@@ -143,6 +158,7 @@ class BeeForagingAlgorithm:
                     selected_sources[idx] = source
                     selected_fitness[idx] = fitness
                     self.stagnation_counters[idx] = 0  # Reset stagnation counter
+                    self.neighborhood_sizes[idx] = self.neighborhood_size  # Reset neighborhood size
                     # Update best solution
                     if fitness > best_fitness:
                         best_fitness = fitness
@@ -150,13 +166,25 @@ class BeeForagingAlgorithm:
                 else:
                     self.stagnation_counters[idx] += 1
 
+            # Abandon food sources that exceed stagnation limit
+            for idx in range(len(selected_sources)):
+                if self.stagnation_counters[idx] > self.limit_stagnation:
+                    # Replace with a new scout
+                    new_scout = self.global_search(1)[0]
+                    new_fitness = calculate_between_class_variance(self.histogram, new_scout)
+                    selected_sources[idx] = new_scout
+                    selected_fitness[idx] = new_fitness
+                    self.stagnation_counters[idx] = 0
+                    self.neighborhood_sizes[idx] = self.neighborhood_size  # Reset neighborhood size
+
             # Global Search Phase
-            num_new_scouts = self.num_scouts - len(selected_sources)
+            num_new_scouts = 2 * len(selected_sources)
             new_scouts = self.global_search(num_new_scouts)
+
             new_fitness = self.evaluate_fitness(new_scouts)
 
             # Combine all sources ensuring they are 2D arrays
-            all_sources = np.vstack([selected_sources, new_scouts.reshape(-1, selected_sources.shape[1])])
+            all_sources = np.vstack([selected_sources, new_scouts.reshape(-1, self.num_thresholds)])
             all_fitness = np.concatenate((selected_fitness, new_fitness))
 
             # Select top K sources for next iteration
@@ -173,10 +201,15 @@ class BeeForagingAlgorithm:
                 best_fitness = current_best_fitness
                 best_thresholds = selected_sources[np.argmax(selected_fitness)]
 
-            print(f'Generation {gen+1}/{self.max_generations}, Best Fitness: {best_fitness:.4f}')
+            self.best_fitness_history.append(best_fitness)
+            self.avg_fitness_history.append(np.mean(selected_fitness))
+            self.best_thresholds_history.append(best_thresholds.copy())
 
-        return best_thresholds, best_fitness
+            print(f'Generation {gen+1}/{self.max_generations}, Best Fitness: {best_fitness:.4f}, Avg Fitness: {self.avg_fitness_history[-1]:.4f}')
 
+        total_time = time.time() - start_time
+        logging.info("Optimization completed in %.2f seconds", total_time)
+        return best_thresholds, best_fitness, self.best_fitness_history, self.avg_fitness_history, self.best_thresholds_history, total_time
 
     def apply_thresholds(self, thresholds):
         thresholds = np.sort(thresholds)
@@ -189,4 +222,6 @@ class BeeForagingAlgorithm:
             segmented[mask] = levels[i]
 
         segmented = segmented.astype(np.uint8)
+        logging.info("Applying thresholds")
+
         return segmented

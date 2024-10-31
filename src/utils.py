@@ -1,7 +1,8 @@
-# utils.py
-
 import numpy as np
+import cv2
 from skimage.metrics import peak_signal_noise_ratio, structural_similarity
+import glob
+import os
 
 def calculate_between_class_variance(histogram, thresholds):
     thresholds = np.sort(thresholds)
@@ -26,3 +27,20 @@ def evaluate_segmentation(original, segmented):
     psnr = peak_signal_noise_ratio(original, segmented, data_range=255)
     ssim = structural_similarity(original, segmented, data_range=255)
     return psnr, ssim
+
+def load_images_from_folder(folder, extensions=['.jpg', '.jpeg', '.png']):
+    images = []
+    image_names = []
+    for ext in extensions:
+        files = glob.glob(os.path.join(folder, '*' + ext))
+        for file in files:
+            # Read the image in color mode
+            image = cv2.imread(file, cv2.IMREAD_COLOR)
+            if image is not None:
+                # Convert to grayscale
+                image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+                # Resize to 512x512
+                image = cv2.resize(image, (512, 512))
+                images.append(image)
+                image_names.append(os.path.basename(file))
+    return images, image_names
